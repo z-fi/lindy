@@ -3,7 +3,7 @@
 Onchain security score based on objective survivorship heuristics.
 Every input is deterministic and verifiable onchain. No trust required.
 
-**[lindy.wei.is](https://lindy.wei.is)**
+**[lindy.wei.is](https://lindy.wei.is)** | **[github](https://github.com/z-fi/lindy)**
 
 ## How it works
 

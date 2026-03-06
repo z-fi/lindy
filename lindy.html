@@ -49,6 +49,7 @@
       pre {
         font-family: inherit;
         white-space: pre;
+        overflow-x: auto;
       }
 
       .sep {
@@ -87,7 +88,7 @@
         border: none;
         font-family: var(--font);
         font-size: 13px;
-        padding: 3px 0;
+        padding: 10px 0;
         cursor: pointer;
         width: 100%;
         text-align: left;
@@ -146,10 +147,10 @@
         color: var(--dim);
       }
       input.addr {
-        font-size: 13px;
+        font-size: 16px;
       }
       input.key {
-        font-size: 11px;
+        font-size: 16px;
         margin-top: 4px;
       }
 
@@ -702,7 +703,8 @@
 
       // ─── ETHERSCAN ─────────────────────────────────────────
       var lastEscanCall = 0;
-      async function escanFetch(params) {
+      async function escanFetch(params, retries) {
+        if (retries === undefined) retries = 2;
         // rate limit: free tier ~5/sec with key, ~1/sec without. 450ms is safe for both
         var now = Date.now();
         var wait = 450 - (now - lastEscanCall);
@@ -712,7 +714,16 @@
         var p = Object.assign({ chainid: "1" }, params);
         if (apiKey) p.apikey = apiKey; // only send key if set
         var qs = new URLSearchParams(p);
-        var resp = await fetch(EAPI + "?" + qs);
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, 10000);
+        var resp = await fetch(EAPI + "?" + qs, { signal: controller.signal });
+        clearTimeout(timer);
+
+        // retry on rate limit
+        if (resp.status === 429 && retries > 0) {
+          await sleep(1000);
+          return escanFetch(params, retries - 1);
+        }
         var j = await resp.json();
 
         // etherscan returns status "0" with result as error string on failure
@@ -765,8 +776,14 @@
       }
 
       // ─── SOURCIFY: FREE SOURCE CODE ──────────────────────
+      function fetchWithTimeout(url, ms) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, ms || 10000);
+        return fetch(url, { signal: controller.signal }).finally(function () { clearTimeout(timer); });
+      }
+
       async function sourcifyFetch(addr) {
-        var resp = await fetch(SOURCIFY + "/" + addr);
+        var resp = await fetchWithTimeout(SOURCIFY + "/" + addr);
         if (!resp.ok) return null;
         var data = await resp.json();
         var files = data.files || [];
@@ -774,7 +791,7 @@
         if (solUrls.length === 0) return null;
         var sources = [];
         for (var i = 0; i < solUrls.length; i++) {
-          var r = await fetch(solUrls[i]);
+          var r = await fetchWithTimeout(solUrls[i]);
           if (r.ok) sources.push(await r.text());
         }
         return sources.length > 0 ? sources.join("\n") : null;
@@ -813,7 +830,7 @@
         var ct = isCustom ? null : CONTRACTS[sel];
         var addr = isCustom ? customAddr.trim() : ct ? ct.addr : "";
         var cType = ct ? ct.type : customType;
-        if (!addr || addr.length !== 42) return;
+        if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
 
         var myId = ++queryId;
         liveEth = null;
@@ -1521,7 +1538,16 @@
         if (apiKey) fp += " | etherscan v2";
         else fp += " | sourcify";
         fp += " | multicall3";
-        document.getElementById("footer").textContent = fp;
+        var footer = document.getElementById("footer");
+        footer.textContent = "";
+        footer.appendChild(document.createTextNode(fp + " | "));
+        var gh = document.createElement("a");
+        gh.href = "https://github.com/z-fi/lindy";
+        gh.target = "_blank";
+        gh.rel = "noopener";
+        gh.textContent = "github";
+        gh.style.color = "var(--dim)";
+        footer.appendChild(gh);
       }
 
       // ─── EVENTS ────────────────────────────────────────────
