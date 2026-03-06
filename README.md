@@ -17,7 +17,7 @@ It combines two core signals — **time survived** and **value at stake** — th
 
 **Value (V)** — How much is on the line.
 - *Escrow contracts*: ETH + ERC20 balances (USDC, USDT, DAI, WETH) priced via Chainlink ETH/USD oracle. Uses the **minimum** balance across three checkpoints (now, 7d ago, 30d ago) — each checkpoint queries both ETH and ERC20 via Multicall3 to resist flash deposits.
-- *Router contracts*: Daily throughput from both ETH internal transactions (`txlistinternal`) and ERC20 transfers (`tokentx`) over a 30-day window. When the 10K record cap is hit, the sample time span is measured and volume is extrapolated to a daily rate.
+- *Router contracts*: Daily throughput from ETH internal transactions (`txlistinternal`) plus ERC20 volume estimated by sampling recent transaction receipts for stablecoin Transfer events. This works for all router types, including pass-through routers (0x, 1inch) where tokens never touch the router contract. When the 10K record cap is hit, the sample time span is measured and volume is extrapolated to a daily rate.
 
 Log-scaled so the difference between 0 and 100 ETH matters more than between 100k and 200k ETH.
 

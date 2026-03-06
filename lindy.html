@@ -345,7 +345,7 @@
       //   deploy   → getcontractcreation (faster)
       //   LOC      → getsourcecode (more coverage)
       //   proxy    → getsourcecode Proxy field
-      //   volume   → txlistinternal + tokentx (routers)
+      //   volume   → txlistinternal + receipt sampling (routers)
       // ═══════════════════════════════════════════════════════
 
       // ─── PUBLIC RPCs (no api key, tried in order) ──────────
@@ -1101,13 +1101,20 @@
         }
         if (stale()) return;
 
-        // ── 2c) router: ERC20 volume via tokentx (etherscan only) ──
+        // ── 2c) router: ERC20 volume via receipt sampling ──
+        // works for all routers including pass-through (0x, 1inch) that use
+        // transferFrom — tokens never touch the router, but Transfer events
+        // still appear in the transaction receipts.
+        // strategy: get recent txs to the router via txlist, sample receipts,
+        // parse Transfer events for known stablecoins, extrapolate.
+        var TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+        var RECEIPT_SAMPLE = 20;
         if (cType === "router" && apiKey) {
-          logStart("tokentx (30d ERC20 volume) ...");
+          logStart("sampling swap receipts (ERC20 volume) ...");
           try {
-            var tv = await escanFetch({
+            var txl = await escanFetch({
               module: "account",
-              action: "tokentx",
+              action: "txlist",
               address: addr,
               startblock: block30 || 0,
               endblock: 99999999,
@@ -1116,67 +1123,82 @@
               sort: "desc",
             });
             if (stale()) return;
-            if (tv.result && Array.isArray(tv.result) && tv.result.length > 0) {
+            if (txl.result && Array.isArray(txl.result) && txl.result.length > 0) {
               var addrLower = addr.toLowerCase();
-              var tokenLookup = {};
-              for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
-                var t = TOP_TOKENS[ti];
-                tokenLookup[t.addr.toLowerCase()] = {
-                  symbol: t.symbol, decimals: t.decimals,
-                  ethPrice: tokenPrices[ti],
-                };
-              }
-              var ttxs = tv.result.filter(function (tx) {
-                return tx.from.toLowerCase() === addrLower &&
-                  tokenLookup[tx.contractAddress.toLowerCase()];
+              var inbound = txl.result.filter(function (tx) {
+                return tx.to && tx.to.toLowerCase() === addrLower && tx.isError === "0";
               });
-              var byToken = {};
-              for (var i = 0; i < ttxs.length; i++) {
-                var ca = ttxs[i].contractAddress.toLowerCase();
-                if (!byToken[ca]) byToken[ca] = BigInt(0);
-                byToken[ca] += BigInt(ttxs[i].value);
-              }
-              // extrapolate if 10K cap was hit
-              var tSampleDays = 30;
-              var tExtraNote = "";
-              if (tv.result.length >= 10000) {
-                var tEarliest = parseInt(tv.result[tv.result.length - 1].timeStamp);
-                var tLatest = parseInt(tv.result[0].timeStamp);
-                var tSpanSec = tLatest - tEarliest;
-                if (tSpanSec > 0) {
-                  tSampleDays = tSpanSec / 86400;
-                  tExtraNote = ", ~" + tSampleDays.toFixed(1) + "d sample";
+              if (inbound.length > 0) {
+                // extrapolate tx count if 10K capped
+                var txSampleDays = 30;
+                if (txl.result.length >= 10000) {
+                  var txE = parseInt(txl.result[txl.result.length - 1].timeStamp);
+                  var txL = parseInt(txl.result[0].timeStamp);
+                  if (txL - txE > 0) txSampleDays = (txL - txE) / 86400;
                 }
-              }
-              var tokenVolEth = 0;
-              var tokenVolParts = [];
-              for (var ca in byToken) {
-                var tok = tokenLookup[ca];
-                var raw = Number(byToken[ca]) / Math.pow(10, tok.decimals);
-                var inEth = raw * tok.ethPrice;
-                if (inEth > 0.1) {
-                  tokenVolEth += inEth;
-                  tokenVolParts.push(tok.symbol + ":" + fE(inEth / tSampleDays));
+                var dailyTxCount = inbound.length / txSampleDays;
+
+                // build stablecoin lookup (exclude WETH — already in txlistinternal)
+                var stableLookup = {};
+                for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+                  var t = TOP_TOKENS[ti];
+                  if (t.symbol !== "WETH") {
+                    stableLookup[t.addr.toLowerCase()] = {
+                      symbol: t.symbol, decimals: t.decimals, price: tokenPrices[ti],
+                    };
+                  }
                 }
-              }
-              if (tokenVolEth > 0) {
-                var tokenVolDay = tokenVolEth / tSampleDays;
-                if (routerVol !== null) routerVol += tokenVolDay;
-                else routerVol = tokenVolDay;
-                logEnd(
-                  "+" + fE(tokenVolDay) + " ETH/day ERC20 (" +
-                    tokenVolParts.join(", ") + tExtraNote + ")",
-                  true
-                );
+
+                // sample receipts
+                var nSample = Math.min(RECEIPT_SAMPLE, inbound.length);
+                var totalSampleEth = 0;
+                var sampledOk = 0;
+                logInfo("fetching " + nSample + " receipts ...");
+                for (var si = 0; si < nSample; si++) {
+                  var rcpt = await rpcCall("eth_getTransactionReceipt", [inbound[si].hash]);
+                  if (stale()) return;
+                  if (rcpt && rcpt.logs) {
+                    var txTokenEth = 0;
+                    for (var li = 0; li < rcpt.logs.length; li++) {
+                      var log = rcpt.logs[li];
+                      if (log.topics && log.topics[0] === TRANSFER_TOPIC && log.data && log.data.length > 2) {
+                        var stb = stableLookup[log.address.toLowerCase()];
+                        if (stb) {
+                          var val = Number(BigInt(log.data)) / Math.pow(10, stb.decimals);
+                          txTokenEth += val * stb.price;
+                        }
+                      }
+                    }
+                    totalSampleEth += txTokenEth;
+                    sampledOk++;
+                  }
+                }
+
+                if (sampledOk > 0 && totalSampleEth > 0) {
+                  // /2: each swap has stablecoins on both sides (in+out),
+                  // or one side overlaps with txlistinternal ETH volume
+                  var avgPerTx = totalSampleEth / sampledOk / 2;
+                  var erc20DailyVol = avgPerTx * dailyTxCount;
+                  if (routerVol !== null) routerVol += erc20DailyVol;
+                  else routerVol = erc20DailyVol;
+                  logEnd(
+                    "+" + fE(erc20DailyVol) + " ETH/day ERC20 (" +
+                      sampledOk + " receipts, ~" +
+                      Math.round(dailyTxCount) + " txs/day)",
+                    true
+                  );
+                } else {
+                  logInfo("no stablecoin volume in sampled receipts");
+                }
               } else {
-                logEnd("no known ERC20 volume in 30d", false);
+                logInfo("no inbound txs in 30d window");
               }
             } else {
-              logEnd("no token txs in 30d window", false);
+              logInfo("no txs in 30d window");
             }
           } catch (e) {
             if (stale()) return;
-            logEnd("tokentx: " + (e.message || "failed"), false);
+            logEnd("receipt sampling: " + (e.message || "failed"), false);
           }
         }
         if (stale()) return;
@@ -1680,7 +1702,8 @@
         notes += "  V  ETH + ERC20 TVL via Multicall3 (escrow)\n";
         notes += "     ERC20 priced via Chainlink ETH/USD\n";
         notes += "     min(now, 7d, 30d) for ETH + ERC20\n";
-        notes += "     txlistinternal + tokentx volume (routers)\n";
+        notes += "     txlistinternal ETH + receipt sampling (routers)\n";
+        notes += "     receipts capture ERC20 for all router types\n";
         notes += "     10K cap → sample extrapolation if needed\n";
         notes += "  C  verified source LOC (sourcify or\n";
         notes += "     etherscan). simpler = higher score\n";
