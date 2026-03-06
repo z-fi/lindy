@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>lindy — onchain score</title>
+    <meta
+      name="description"
+      content="On-chain survivorship heuristic for smart contracts. Every input verifiable. No trust required."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛓</text></svg>"
+    />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap");
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      :root {
+        --bg: #000;
+        --fg: #bbb;
+        --dim: #444;
+        --mid: #777;
+        --hi: #ddd;
+        --ok: #696;
+        --err: #966;
+        --info: #668;
+        --font: "IBM Plex Mono", monospace;
+      }
+      html,
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      body {
+        padding: 20px 16px;
+        min-height: 100vh;
+      }
+      #app {
+        max-width: 580px;
+        margin: 0 auto;
+      }
+      pre {
+        font-family: inherit;
+        white-space: pre;
+      }
+
+      .sep {
+        color: var(--dim);
+        margin: 14px 0;
+        user-select: none;
+      }
+      .label {
+        font-size: 11px;
+        color: var(--dim);
+        letter-spacing: 0.1em;
+        margin-bottom: 6px;
+      }
+      .dim {
+        color: var(--dim);
+      }
+      .mid {
+        color: var(--mid);
+      }
+      .hi {
+        color: var(--hi);
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: var(--err);
+      }
+      .info {
+        color: var(--info);
+      }
+
+      button.row {
+        display: block;
+        background: none;
+        border: none;
+        font-family: var(--font);
+        font-size: 13px;
+        padding: 3px 0;
+        cursor: pointer;
+        width: 100%;
+        text-align: left;
+        color: var(--fg);
+        transition: color 0.1s;
+      }
+      button.row:hover {
+        color: var(--hi);
+      }
+      button.row .tag {
+        color: var(--dim);
+        font-size: 10px;
+        margin-left: 6px;
+      }
+      button.row .addr {
+        color: var(--dim);
+        font-size: 11px;
+        margin-left: 4px;
+      }
+
+      button.link {
+        background: none;
+        border: none;
+        font-family: var(--font);
+        font-size: 11px;
+        color: var(--dim);
+        cursor: pointer;
+        padding: 0;
+      }
+      button.link:hover {
+        color: var(--mid);
+      }
+      a.zfi {
+        color: var(--dim);
+        text-decoration: none;
+        border-bottom: 1px solid var(--dim);
+      }
+      a.zfi:hover {
+        color: var(--mid);
+        border-color: var(--mid);
+      }
+
+      input.field {
+        display: block;
+        width: 100%;
+        background: none;
+        border: none;
+        border-bottom: 1px solid var(--dim);
+        color: var(--hi);
+        font-family: var(--font);
+        padding: 6px 0 6px 16px;
+        outline: none;
+        box-sizing: border-box;
+      }
+      input.field::placeholder {
+        color: var(--dim);
+      }
+      input.addr {
+        font-size: 13px;
+      }
+      input.key {
+        font-size: 11px;
+        margin-top: 4px;
+      }
+
+      select.type-sel {
+        background: var(--bg);
+        border: 1px solid var(--dim);
+        color: var(--hi);
+        font-family: var(--font);
+        font-size: 11px;
+        padding: 3px 6px;
+        margin-left: 16px;
+        margin-top: 4px;
+        outline: none;
+        cursor: pointer;
+      }
+
+      #log-box {
+        min-height: 24px;
+      }
+      .log-line {
+        display: flex;
+        font-size: 11px;
+        line-height: 1.7;
+      }
+      .log-icon {
+        width: 28px;
+        flex-shrink: 0;
+        text-align: right;
+        padding-right: 6px;
+      }
+      .log-msg {
+        color: var(--fg);
+      }
+
+      #score-num {
+        font-size: 36px;
+        font-weight: 600;
+        color: var(--hi);
+        line-height: 1;
+        text-align: center;
+      }
+      #score-grade {
+        font-size: 10px;
+        color: var(--mid);
+        letter-spacing: 0.2em;
+        text-align: center;
+        margin-top: 6px;
+      }
+      #score-bar {
+        font-size: 13px;
+        text-align: center;
+        margin-top: 12px;
+      }
+      #score-axis {
+        font-size: 10px;
+        color: var(--dim);
+        text-align: center;
+        margin-top: 2px;
+      }
+
+      @media (max-width: 480px) {
+        body {
+          padding: 12px 8px;
+          font-size: 12px;
+        }
+        #score-num {
+          font-size: 28px;
+        }
+        pre {
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <pre id="logo" class="hi" style="font-size: 11px; line-height: 1.3">
+    __ _           __
+   / /(_)___  ____/ /_  __
+  / / / / __ \/ __  / / / /
+ / / / / / / / /_/ / /_/ /
+/_/ /_/_/ /_/\__,_/\__, /
+                  /____/  v0.1</pre
+      >
+      <div class="dim" style="font-size: 11px; margin-top: 6px">
+        survivorship heuristic, not an audit
+      </div>
+      <div class="dim" style="font-size: 10px; margin-top: 2px">
+        every input verifiable. no trust required.
+      </div>
+      <div class="mid" style="font-size: 10px; margin-top: 6px">
+        &radic;(age &times; value) &times; complexity &times; penalties
+      </div>
+      <div class="dim" style="font-size: 10px; margin-top: 1px">
+        penalizes proxies and unverified source
+      </div>
+      <div style="font-size: 10px; margin-top: 4px">
+        <a class="zfi" href="https://zfi.wei.is/" target="_blank" rel="noopener"
+          >built by zFi</a
+        >
+      </div>
+
+      <pre class="sep"></pre>
+
+      <div class="label">CONTRACT</div>
+      <div id="contract-list"></div>
+      <button class="row" id="custom-btn">
+        <span class="dim"> </span>custom
+      </button>
+      <div id="custom-box" style="display: none">
+        <input
+          class="field addr"
+          id="custom-input"
+          placeholder="  0x..."
+          spellcheck="false"
+        />
+        <select class="type-sel" id="custom-type">
+          <option value="escrow">escrow (balance = V)</option>
+          <option value="router">router (throughput = V)</option>
+        </select>
+      </div>
+
+      <div style="margin-top: 10px">
+        <button class="link" id="key-toggle">[+] etherscan api key</button>
+        <input
+          class="field key"
+          id="key-input"
+          placeholder="  paste free etherscan api key"
+          spellcheck="false"
+          style="display: none"
+        />
+      </div>
+
+      <pre class="sep"></pre>
+      <div class="label">QUERY LOG</div>
+      <div id="log-box">
+        <div class="dim" style="font-size: 11px; padding-left: 28px">
+          waiting...
+        </div>
+      </div>
+
+      <pre class="sep"></pre>
+      <div class="label">RESOLVED</div>
+      <pre id="resolved-out"></pre>
+
+      <pre class="sep"></pre>
+      <div class="label" style="margin-bottom: 12px">SCORE</div>
+      <div id="score-num">0.0</div>
+      <div id="score-grade">UNPROVEN</div>
+      <pre id="score-bar"></pre>
+      <pre id="score-axis"></pre>
+      <pre id="breakdown" style="margin-top: 16px"></pre>
+
+      <pre class="sep"></pre>
+      <div class="label" style="margin-bottom: 8px">FORMULA</div>
+      <pre id="formula-out"></pre>
+
+      <pre class="sep"></pre>
+      <pre
+        id="notes-out"
+        style="font-size: 10px; line-height: 1.8; color: var(--dim)"
+      ></pre>
+
+      <pre class="sep"></pre>
+      <div id="footer" style="font-size: 10px; color: var(--dim)"></div>
+      <div style="height: 40px"></div>
+    </div>
+
+    <script>
+      // ═══════════════════════════════════════════════════════
+      // lindy v0.1 — on-chain survivorship heuristic
+      //
+      // single-file dapp, zero build step, IPFS-pinnable
+      //
+      // data sources (no API key needed):
+      //   balance  → Multicall3: getEthBalance + ERC20 balanceOf
+      //   history  → eth_getBalance at 7d/30d blocks (min)
+      //   deploy   → RPC binary search on eth_getCode
+      //   LOC      → Sourcify (fallback: bytecode length)
+      //   proxy    → eth_getStorageAt EIP-1967 slot
+      //
+      // with etherscan API key (optional):
+      //   balance  → same (RPC)
+      //   history  → getblocknobytime (faster)
+      //   deploy   → getcontractcreation (faster)
+      //   LOC      → getsourcecode (more coverage)
+      //   proxy    → getsourcecode Proxy field
+      //   volume   → txlistinternal (routers only)
+      // ═══════════════════════════════════════════════════════
+
+      // ─── PUBLIC RPCs (no api key, tried in order) ──────────
+      var RPC_LIST = [
+        "https://ethereum.publicnode.com",
+        "https://1rpc.io/eth",
+        "https://eth.drpc.org",
+        "https://eth.llamarpc.com",
+      ];
+      var rpcIndex = 0; // tracks which RPC succeeded last
+
+      var EAPI = "https://api.etherscan.io/v2/api";
+      var SOURCIFY = "https://sourcify.dev/server/files/tree/any/1";
+
+      // ─── HARDCODED CONTRACTS ───────────────────────────────
+      // type: "escrow" = V from eth_getBalance (value held)
+      //       "router" = V from txlistinternal (value routed/day)
+      //
+      // fallbackEth: conservative estimate when no live data
+      // knownLoc: from etherscan verified source or manual count
+      var CONTRACTS = [
+        {
+          id: "weth",
+          name: "WETH",
+          addr: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          type: "escrow",
+          deployed: "2017-12-01",
+          knownLoc: 62,
+          knownProxy: false,
+          fallbackEth: 3200000,
+          desc: "canonical wrapped ether",
+        },
+        {
+          id: "deposit",
+          name: "Beacon Deposit",
+          addr: "0x00000000219ab540356cBB839Cbe05303d7705Fa",
+          type: "escrow",
+          deployed: "2020-11-04",
+          knownLoc: 285,
+          knownProxy: false,
+          fallbackEth: 34000000,
+          desc: "eth2 staking deposit",
+        },
+        {
+          id: "v2router",
+          name: "Uniswap V2 Router",
+          addr: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+          type: "router",
+          deployed: "2020-05-18",
+          knownLoc: 468,
+          knownProxy: false,
+          fallbackEth: 15000,
+          desc: "swap router",
+        },
+        {
+          id: "v3router",
+          name: "Uniswap V3 Router",
+          addr: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+          type: "router",
+          deployed: "2021-05-05",
+          knownLoc: 780,
+          knownProxy: false,
+          fallbackEth: 25000,
+          desc: "concentrated liquidity",
+        },
+        {
+          id: "v4pool",
+          name: "Uniswap V4 PoolManager",
+          addr: "0x000000000004444c5dc75cB358380D2e3dE08A90",
+          type: "escrow",
+          deployed: "2025-01-23",
+          knownLoc: 3500,
+          knownProxy: false,
+          fallbackEth: 20000,
+          desc: "singleton pool manager",
+        },
+        {
+          id: "zamm",
+          name: "zAMM",
+          addr: "0x000000000000040470635EB91b7CE4D132D616eD",
+          type: "escrow",
+          deployed: "2025-05-01",
+          knownLoc: 1100,
+          knownProxy: false,
+          fallbackEth: 30,
+          desc: "singleton amm (ERC-6909)",
+        },
+        {
+          id: "zrouter",
+          name: "zRouter",
+          addr: "0x000000000000FB114709235f1ccBFfb925F600e4",
+          type: "router",
+          deployed: "2025-05-01",
+          knownLoc: 2200,
+          knownProxy: false,
+          fallbackEth: 1,
+          desc: "dex aggregator",
+        },
+        {
+          id: "pamm",
+          name: "pAMM",
+          addr: "0x000000000044bfe6c2BBFeD8862973E0612f07C0",
+          type: "escrow",
+          deployed: "2025-06-01",
+          knownLoc: 1000,
+          knownProxy: false,
+          fallbackEth: 1,
+          desc: "prediction market vault",
+        },
+      ];
+
+      // ─── FORMULA CONSTANTS ─────────────────────────────────
+      var TIME_CAP = 2555; // ~7y saturation
+      var V_CAP_E = 500000; // escrow: ETH held
+      var V_CAP_R = 50000; // router: ETH/day throughput
+      var LOC_REF = 500; // complexity baseline
+      var C_EXP = 0.25; // complexity exponent
+      var P_PENALTY = 0.85; // proxy multiplier
+      var U_PENALTY = 0.7; // unverified source multiplier
+
+      // ─── TOP ERC20s FOR TVL DETECTION ─────────────────────
+      // balanceOf(address) selector = 0x70a08231
+      // conservative ETH prices (underestimates are safer)
+      var TOP_TOKENS = [
+        { symbol: "USDC", addr: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, ethPrice: 0.0004 },
+        { symbol: "USDT", addr: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6, ethPrice: 0.0004 },
+        { symbol: "DAI",  addr: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18, ethPrice: 0.0004 },
+        { symbol: "WETH", addr: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18, ethPrice: 1.0 },
+      ];
+      var BALANCE_OF_SEL = "0x70a08231"; // balanceOf(address)
+      var GET_ETH_BAL_SEL = "0x4d2301cc"; // getEthBalance(address)
+
+      var MC3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+      // ─── STATE ─────────────────────────────────────────────
+      var sel = 0;
+      var isCustom = false;
+      var showKey = false;
+      var apiKey = "";
+      var customAddr = "";
+      var customType = "escrow";
+
+      var liveEth = null;
+      var liveDeploy = null;
+      var liveLoc = null;
+      var liveProxy = null;
+      var liveUnver = null;
+      var routerVol = null;
+      var logItems = [];
+      var queryId = 0;
+      var usedRpc = ""; // which RPC endpoint answered
+
+      // ─── UTIL ──────────────────────────────────────────────
+      function fE(v) {
+        if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+        return v.toFixed(1);
+      }
+      function fD(d) {
+        return d >= 365 ? (d / 365).toFixed(1) + "y" : d + "d";
+      }
+      function fA(a) {
+        return a ? a.slice(0, 6) + ".." + a.slice(-4) : "";
+      }
+      function bar(pct, w) {
+        w = w || 24;
+        var f = Math.round(Math.min(Math.max(pct, 0), 1) * w);
+        return "\u2588".repeat(f) + "\u2591".repeat(w - f);
+      }
+      function pad(s, n) {
+        s = String(s);
+        while (s.length < n) s = " " + s;
+        return s;
+      }
+      function rpad(s, n) {
+        s = String(s);
+        while (s.length < n) s = s + " ";
+        return s;
+      }
+      function daysSince(d) {
+        return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+      }
+      function esc(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+      function sleep(ms) {
+        return new Promise(function (r) {
+          setTimeout(r, ms);
+        });
+      }
+
+      // ─── SCORING ───────────────────────────────────────────
+      function computeScore(p) {
+        var days = p.days || 0;
+        var eth = p.eth || 0;
+        var loc = Math.max(p.loc || 100, 10);
+        var T = Math.min(1, Math.log(1 + days) / Math.log(1 + TIME_CAP));
+        var vCap = p.type === "router" ? V_CAP_R : V_CAP_E;
+        var V = Math.min(1, Math.log(1 + eth) / Math.log(1 + vCap));
+        var base = Math.sqrt(T * V) * 100;
+        var Cm = 1 / Math.pow(loc / LOC_REF, C_EXP);
+        var P = p.proxy ? P_PENALTY : 1.0;
+        var Uv = p.unverified ? U_PENALTY : 1.0;
+        var raw = base * Cm * P * Uv;
+        return {
+          T: T,
+          V: V,
+          base: base,
+          Cm: Cm,
+          P: P,
+          Uv: Uv,
+          vCap: vCap,
+          final: Math.min(99, Math.max(0, raw)),
+          days: days,
+          eth: eth,
+          loc: loc,
+        };
+      }
+
+      // ─── LOC COUNTING ──────────────────────────────────────
+      function countLoc(src) {
+        var inBlock = false,
+          count = 0,
+          lines = src.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          while (true) {
+            if (inBlock) {
+              var end = line.indexOf("*/");
+              if (end === -1) {
+                line = "";
+                break;
+              }
+              line = line.slice(end + 2);
+              inBlock = false;
+            }
+            var start = line.indexOf("/*");
+            if (start === -1) break;
+            var end2 = line.indexOf("*/", start + 2);
+            if (end2 === -1) {
+              line = line.slice(0, start);
+              inBlock = true;
+              break;
+            }
+            line = line.slice(0, start) + line.slice(end2 + 2);
+          }
+          var lc = line.indexOf("//");
+          if (lc !== -1) line = line.slice(0, lc);
+          if (line.trim()) count++;
+        }
+        return count;
+      }
+
+      // ─── RPC WITH FALLBACK ─────────────────────────────────
+      // tries each public RPC in order, 4s timeout per attempt
+      // starts from last-known-good index for speed
+      async function rpcCall(method, params) {
+        var tried = 0;
+        var total = RPC_LIST.length;
+        var idx = rpcIndex;
+        while (tried < total) {
+          var url = RPC_LIST[idx % total];
+          try {
+            var controller = new AbortController();
+            var timer = setTimeout(function () {
+              controller.abort();
+            }, 4000);
+            var resp = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                method: method,
+                params: params,
+                id: 1,
+              }),
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            var j = await resp.json();
+            if (j.error) throw new Error(j.error.message || "rpc error");
+            if (j.result === null || j.result === undefined)
+              throw new Error("null result");
+            rpcIndex = idx % total; // remember good endpoint
+            usedRpc = url.replace("https://", "").split("/")[0];
+            return j.result;
+          } catch (e) {
+            tried++;
+            idx++;
+          }
+        }
+        throw new Error("all " + total + " RPCs failed");
+      }
+
+      // ─── MULTICALL3 BATCH ────────────────────────────────
+      // aggregate3((target,allowFailure,callData)[]) → (success,returnData)[]
+      // hand-encoded ABI — no ethers.js dependency
+      function mc3Encode(calls) {
+        // aggregate3 selector = 0x82ad56cb
+        // encode: offset(32) + length(32) + N * (target+allowFailure+offset) + N * (calldata)
+        // simpler: build hex manually for fixed-size inner calls
+        var n = calls.length;
+        // each tuple: (address, bool, bytes) — bytes is dynamic so tuples are dynamic
+        // offset to array = 0x20
+        var hex = "0x82ad56cb";
+        hex += p256(0x20); // offset to array
+        hex += p256(n); // array length
+        // offsets for each tuple (each tuple has dynamic bytes, so need offsets)
+        var tupleOffsets = [];
+        var off = n * 32; // past the offset table
+        for (var i = 0; i < n; i++) {
+          tupleOffsets.push(off);
+          var cdLen = (calls[i].data.length - 2) / 2; // bytes length
+          // tuple: address(32) + allowFailure(32) + bytesOffset(32) + bytesLen(32) + bytesData(ceil32)
+          off += 32 + 32 + 32 + 32 + Math.ceil(cdLen / 32) * 32;
+        }
+        for (var i = 0; i < n; i++) hex += p256(tupleOffsets[i]);
+        for (var i = 0; i < n; i++) {
+          var c = calls[i];
+          hex += p256(c.target); // address (left-padded)
+          hex += p256(c.allowFailure ? 1 : 0);
+          hex += p256(0x60); // offset to bytes within tuple
+          var cdBytes = c.data.slice(2);
+          var cdLen = cdBytes.length / 2;
+          hex += p256(cdLen);
+          hex += cdBytes + "0".repeat((Math.ceil(cdLen / 32) * 32 - cdLen) * 2);
+        }
+        return hex;
+      }
+      function mc3Decode(raw) {
+        // returns: [{success: bool, data: "0x..."}]
+        // result: offset(32) + length(32) + tuple offsets + tuples
+        var d = raw.slice(2); // strip 0x
+        var arrOff = parseInt(d.slice(0, 64), 16) * 2;
+        var arrLen = parseInt(d.slice(arrOff, arrOff + 64), 16);
+        var results = [];
+        for (var i = 0; i < arrLen; i++) {
+          var tupleOff = arrOff + 64 + parseInt(d.slice(arrOff + 64 + i * 64, arrOff + 128 + i * 64), 16) * 2;
+          var success = parseInt(d.slice(tupleOff, tupleOff + 64), 16) === 1;
+          var bytesOff = tupleOff + parseInt(d.slice(tupleOff + 64, tupleOff + 128), 16) * 2;
+          var bytesLen = parseInt(d.slice(bytesOff, bytesOff + 64), 16);
+          var data = "0x" + d.slice(bytesOff + 64, bytesOff + 64 + bytesLen * 2);
+          results.push({ success: success, data: data });
+        }
+        return results;
+      }
+      function p256(v) {
+        if (typeof v === "string" && v.startsWith("0x"))
+          return v.slice(2).toLowerCase().padStart(64, "0");
+        return BigInt(v).toString(16).padStart(64, "0");
+      }
+      async function mc3Call(calls, blockTag) {
+        var calldata = mc3Encode(calls);
+        var raw = await rpcCall("eth_call", [
+          { to: MC3, data: calldata },
+          blockTag || "latest",
+        ]);
+        return mc3Decode(raw);
+      }
+
+      // ─── ETHERSCAN ─────────────────────────────────────────
+      var lastEscanCall = 0;
+      async function escanFetch(params) {
+        // rate limit: free tier ~5/sec with key, ~1/sec without. 450ms is safe for both
+        var now = Date.now();
+        var wait = 450 - (now - lastEscanCall);
+        if (wait > 0) await sleep(wait);
+        lastEscanCall = Date.now();
+
+        var p = Object.assign({ chainid: "1" }, params);
+        if (apiKey) p.apikey = apiKey; // only send key if set
+        var qs = new URLSearchParams(p);
+        var resp = await fetch(EAPI + "?" + qs);
+        var j = await resp.json();
+
+        // etherscan returns status "0" with result as error string on failure
+        if (j.status === "0" && typeof j.result === "string") {
+          throw new Error(j.result);
+        }
+        return j;
+      }
+
+      // ─── RPC: BLOCK BY TIMESTAMP (binary search) ──────────
+      // finds the block closest to a target unix timestamp
+      // ~10 RPC calls via bisection, no API key needed
+      async function rpcBlockByTime(targetTs) {
+        var lo = 1;
+        var latest = await rpcCall("eth_getBlockByNumber", ["latest", false]);
+        var hi = parseInt(latest.number, 16);
+        // initial estimate from avg 12s block time
+        var guess = hi - Math.floor((parseInt(latest.timestamp, 16) - targetTs) / 12);
+        if (guess > lo && guess < hi) lo = Math.max(1, guess - 1000);
+        while (hi - lo > 1) {
+          var mid = Math.floor((lo + hi) / 2);
+          var blk = await rpcCall("eth_getBlockByNumber", ["0x" + mid.toString(16), false]);
+          if (parseInt(blk.timestamp, 16) <= targetTs) lo = mid;
+          else hi = mid;
+        }
+        return lo;
+      }
+
+      // ─── RPC: DEPLOY DATE (binary search on eth_getCode) ──
+      // finds the first block where address has code
+      // ~20 RPC calls, no API key needed
+      async function rpcDeployBlock(addr) {
+        var latest = await rpcCall("eth_getBlockByNumber", ["latest", false]);
+        var hi = parseInt(latest.number, 16);
+        var lo = 0;
+        while (hi - lo > 1) {
+          var mid = Math.floor((lo + hi) / 2);
+          var code = await rpcCall("eth_getCode", [addr, "0x" + mid.toString(16)]);
+          if (code && code !== "0x") hi = mid;
+          else lo = mid;
+        }
+        return hi;
+      }
+
+      // ─── RPC: PROXY DETECTION (EIP-1967 storage slot) ─────
+      var EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+      async function rpcIsProxy(addr) {
+        var val = await rpcCall("eth_getStorageAt", [addr, EIP1967_IMPL_SLOT, "latest"]);
+        return val && val !== "0x" && val !== "0x" + "0".repeat(64);
+      }
+
+      // ─── SOURCIFY: FREE SOURCE CODE ──────────────────────
+      async function sourcifyFetch(addr) {
+        var resp = await fetch(SOURCIFY + "/" + addr);
+        if (!resp.ok) return null;
+        var data = await resp.json();
+        var files = data.files || [];
+        var solUrls = files.filter(function (f) { return f.endsWith(".sol"); });
+        if (solUrls.length === 0) return null;
+        var sources = [];
+        for (var i = 0; i < solUrls.length; i++) {
+          var r = await fetch(solUrls[i]);
+          if (r.ok) sources.push(await r.text());
+        }
+        return sources.length > 0 ? sources.join("\n") : null;
+      }
+
+      // ─── LOG HELPER ────────────────────────────────────────
+      // each step gets a log index. loading entries are updated
+      // in-place when their step resolves.
+      var logStepIdx = -1;
+
+      function logStart(msg) {
+        // always append a new loading entry
+        logStepIdx = logItems.length;
+        logItems.push({ msg: msg, ok: null, loading: true });
+        render();
+      }
+
+      function logEnd(msg, ok) {
+        // update the entry created by logStart
+        if (logStepIdx >= 0 && logStepIdx < logItems.length) {
+          logItems[logStepIdx] = { msg: msg, ok: ok, loading: false };
+        } else {
+          logItems.push({ msg: msg, ok: ok, loading: false });
+        }
+        logStepIdx = -1;
+        render();
+      }
+
+      function logInfo(msg) {
+        logItems.push({ msg: msg, ok: null, loading: false });
+        render();
+      }
+
+      // ─── QUERY CHAIN ───────────────────────────────────────
+      async function runQuery() {
+        var ct = isCustom ? null : CONTRACTS[sel];
+        var addr = isCustom ? customAddr.trim() : ct ? ct.addr : "";
+        var cType = ct ? ct.type : customType;
+        if (!addr || addr.length !== 42) return;
+
+        var myId = ++queryId;
+        liveEth = null;
+        liveDeploy = null;
+        liveLoc = null;
+        liveProxy = null;
+        liveUnver = null;
+        routerVol = null;
+        logItems = [];
+        usedRpc = "";
+        render();
+
+        function stale() {
+          return myId !== queryId;
+        }
+
+        // ── 1) ETH + ERC20 balances via Multicall3 (1 RPC call) ──
+        logStart("multicall3: ETH + ERC20 balances ...");
+        var balNow = 0;
+        try {
+          var padAddr = addr.toLowerCase().slice(2).padStart(64, "0");
+          var calls = [
+            { target: MC3, allowFailure: true, data: GET_ETH_BAL_SEL + padAddr },
+          ];
+          if (cType === "escrow") {
+            for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+              calls.push({
+                target: TOP_TOKENS[ti].addr,
+                allowFailure: true,
+                data: BALANCE_OF_SEL + padAddr,
+              });
+            }
+          }
+          var results = await mc3Call(calls);
+          if (stale()) return;
+
+          // decode ETH balance (index 0)
+          if (results[0].success) {
+            balNow = Number(BigInt(results[0].data)) / 1e18;
+          }
+          if (cType === "escrow") {
+            liveEth = balNow;
+            // decode ERC20 balances (indices 1..4)
+            var tokenEth = 0;
+            var tokenParts = [];
+            for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+              var r = results[ti + 1];
+              if (r.success && r.data && r.data !== "0x" && r.data.length > 2) {
+                var tok = TOP_TOKENS[ti];
+                var raw = Number(BigInt(r.data)) / Math.pow(10, tok.decimals);
+                var inEth = raw * tok.ethPrice;
+                if (inEth > 0.1) {
+                  tokenEth += inEth;
+                  tokenParts.push(tok.symbol + ":" + fE(inEth));
+                }
+              }
+            }
+            if (tokenEth > 0) liveEth += tokenEth;
+            var tvlMsg = "tvl: " + fE(balNow) + " ETH";
+            if (tokenParts.length > 0)
+              tvlMsg += " + " + fE(tokenEth) + " equiv (" + tokenParts.join(", ") + ")";
+            logEnd(tvlMsg + "  [" + usedRpc + "]", true);
+          } else {
+            logEnd(
+              "balance: " + fE(balNow) + " ETH (not V for routers)  [" + usedRpc + "]",
+              true
+            );
+          }
+        } catch (e) {
+          if (stale()) return;
+          logEnd("multicall: " + (e.message || "failed"), false);
+        }
+
+        // ── 2) resolve historical blocks (RPC binary search or etherscan) ──
+        logStart("resolving blocks (7d, 30d ago) ...");
+        var block7 = null;
+        var block30 = null;
+        try {
+          var nowTs = Math.floor(Date.now() / 1000);
+          if (apiKey) {
+            var bk7 = await escanFetch({
+              module: "block",
+              action: "getblocknobytime",
+              timestamp: String(nowTs - 7 * 86400),
+              closest: "before",
+            });
+            if (stale()) return;
+            if (bk7.result) block7 = parseInt(bk7.result);
+            var bk30 = await escanFetch({
+              module: "block",
+              action: "getblocknobytime",
+              timestamp: String(nowTs - 30 * 86400),
+              closest: "before",
+            });
+            if (stale()) return;
+            if (bk30.result) block30 = parseInt(bk30.result);
+          } else {
+            block7 = await rpcBlockByTime(nowTs - 7 * 86400);
+            if (stale()) return;
+            block30 = await rpcBlockByTime(nowTs - 30 * 86400);
+            if (stale()) return;
+          }
+          if (block7 && block30) {
+            logEnd("block " + block30 + " (30d) / " + block7 + " (7d)", true);
+          } else {
+            logEnd("partial block resolution", false);
+          }
+        } catch (e) {
+          if (stale()) return;
+          logEnd("block lookup: " + (e.message || "failed"), false);
+        }
+        if (stale()) return;
+
+        // ── 2a) escrow: min balance over 30d window ──
+        if (cType === "escrow" && (block7 || block30)) {
+          logStart("historical balances ...");
+          try {
+            var bals = [balNow];
+            if (block7) {
+              var h7 = await rpcCall("eth_getBalance", [addr, "0x" + block7.toString(16)]);
+              if (stale()) return;
+              bals.push(Number(BigInt(h7)) / 1e18);
+            }
+            if (block30) {
+              var h30 = await rpcCall("eth_getBalance", [addr, "0x" + block30.toString(16)]);
+              if (stale()) return;
+              bals.push(Number(BigInt(h30)) / 1e18);
+            }
+            var minBal = Math.min.apply(null, bals);
+            liveEth = minBal;
+            logEnd(
+              "min(" + bals.map(function (b) { return fE(b); }).join(", ") +
+                ") = " + fE(minBal) + " ETH",
+              true
+            );
+          } catch (e) {
+            if (stale()) return;
+            logEnd("historical balance: " + (e.message || "failed"), false);
+          }
+          if (stale()) return;
+        }
+
+        // ── 2b) router: volume in 30d window (etherscan only) ──
+        if (cType === "router" && apiKey) {
+          logStart("txlistinternal (30d volume) ...");
+          try {
+            var rv = await escanFetch({
+              module: "account",
+              action: "txlistinternal",
+              address: addr,
+              startblock: block30 || 0,
+              endblock: 99999999,
+              page: 1,
+              offset: 10000,
+              sort: "desc",
+            });
+            if (stale()) return;
+            if (rv.result && Array.isArray(rv.result) && rv.result.length > 0) {
+              var addrLower = addr.toLowerCase();
+              var txs = rv.result.filter(function (tx) {
+                return (
+                  tx.isError === "0" &&
+                  tx.value !== "0" &&
+                  tx.from.toLowerCase() === addrLower
+                );
+              });
+              if (txs.length > 0) {
+                var totalWei = BigInt(0);
+                for (var ti = 0; ti < txs.length; ti++) {
+                  totalWei += BigInt(txs[ti].value);
+                }
+                var totalEth = Number(totalWei) / 1e18;
+                routerVol = totalEth / 30;
+                logEnd(
+                  "~" +
+                    fE(routerVol) +
+                    " ETH/day (" +
+                    txs.length +
+                    " out txs, 30d window)",
+                  true
+                );
+                if (ct && Math.abs(routerVol - ct.fallbackEth) / Math.max(ct.fallbackEth, 1) > 0.5) {
+                  logInfo("fallback was " + fE(ct.fallbackEth) + " ETH/day \u2014 live data used");
+                }
+              } else {
+                logEnd("no outgoing ETH txs in 30d window", false);
+              }
+            } else {
+              logEnd("no internal txs in 30d window", false);
+            }
+          } catch (e) {
+            if (stale()) return;
+            logEnd("volume: " + (e.message || "failed"), false);
+          }
+        } else if (cType === "router" && !apiKey) {
+          logInfo("router volume needs etherscan key \u2014 using fallback");
+        }
+        if (stale()) return;
+
+        // ── 3) deploy date (RPC binary search or etherscan) ──
+        logStart("resolving deploy date ...");
+        try {
+          if (apiKey) {
+            var cr = await escanFetch({
+              module: "contract",
+              action: "getcontractcreation",
+              contractaddresses: addr,
+            });
+            if (stale()) return;
+            if (
+              cr.result &&
+              Array.isArray(cr.result) &&
+              cr.result[0] &&
+              cr.result[0].txHash
+            ) {
+              var txr = await rpcCall("eth_getTransactionByHash", [
+                cr.result[0].txHash,
+              ]);
+              if (stale()) return;
+              if (txr && txr.blockNumber) {
+                var blkr = await rpcCall("eth_getBlockByNumber", [
+                  txr.blockNumber,
+                  false,
+                ]);
+                if (stale()) return;
+                if (blkr && blkr.timestamp) {
+                  var ts = parseInt(blkr.timestamp, 16) * 1000;
+                  if (!isNaN(ts) && ts > 0) {
+                    var dt = new Date(ts).toISOString().split("T")[0];
+                    var days = Math.floor((Date.now() - ts) / 86400000);
+                    liveDeploy = { date: dt, days: days };
+                    logEnd("deployed " + dt + " (" + fD(days) + " ago) [etherscan]", true);
+                  } else {
+                    logEnd("bad block timestamp", false);
+                  }
+                } else {
+                  logEnd("block data missing", false);
+                }
+              } else {
+                logEnd("tx data missing", false);
+              }
+            } else {
+              logEnd("creation tx not found", false);
+            }
+          } else {
+            // RPC binary search: find first block with code
+            var deployBlk = await rpcDeployBlock(addr);
+            if (stale()) return;
+            var blkData = await rpcCall("eth_getBlockByNumber", [
+              "0x" + deployBlk.toString(16),
+              false,
+            ]);
+            if (stale()) return;
+            if (blkData && blkData.timestamp) {
+              var ts2 = parseInt(blkData.timestamp, 16) * 1000;
+              if (!isNaN(ts2) && ts2 > 0) {
+                var dt2 = new Date(ts2).toISOString().split("T")[0];
+                var days2 = Math.floor((Date.now() - ts2) / 86400000);
+                liveDeploy = { date: dt2, days: days2 };
+                logEnd("deployed " + dt2 + " (" + fD(days2) + " ago) [rpc bisect]", true);
+              } else {
+                logEnd("bad block timestamp", false);
+              }
+            } else {
+              logEnd("block data missing", false);
+            }
+          }
+        } catch (e) {
+          if (stale()) return;
+          logEnd("deploy: " + (e.message || "failed"), false);
+        }
+        if (stale()) return;
+
+        // ── 4) source code + proxy detection ──
+        // try etherscan if key available, otherwise sourcify + RPC
+        if (apiKey) {
+          logStart("getsourcecode [etherscan] ...");
+          try {
+            var sc = await escanFetch({
+              module: "contract",
+              action: "getsourcecode",
+              address: addr,
+            });
+            if (stale()) return;
+            if (sc.result && Array.isArray(sc.result) && sc.result[0]) {
+              var info = sc.result[0];
+              var hasSrc =
+                typeof info.SourceCode === "string" && info.SourceCode.length > 2;
+              liveUnver = !hasSrc;
+
+              if (hasSrc) {
+                var src = info.SourceCode;
+                if (src.startsWith("{{")) {
+                  try {
+                    var parsed = JSON.parse(src.slice(1, -1));
+                    var sources = parsed.sources || {};
+                    src = Object.values(sources)
+                      .map(function (s) {
+                        return s.content || "";
+                      })
+                      .join("\n");
+                  } catch (ex) {}
+                } else if (src.charAt(0) === "{") {
+                  try {
+                    var parsed2 = JSON.parse(src);
+                    if (parsed2.sources) {
+                      src = Object.values(parsed2.sources)
+                        .map(function (s) {
+                          return s.content || "";
+                        })
+                        .join("\n");
+                    }
+                  } catch (ex) {}
+                }
+                var lines = countLoc(src);
+                liveLoc = lines;
+                logEnd("verified: " + lines.toLocaleString() + " LOC", true);
+                if (ct && ct.knownLoc && Math.abs(lines - ct.knownLoc) / ct.knownLoc > 0.3) {
+                  logInfo("known LOC was " + ct.knownLoc + " \u2014 live count used");
+                }
+              } else {
+                logEnd("source NOT verified \u2014 \u00d70.70 penalty", false);
+              }
+
+              // proxy detection from etherscan response
+              var proxyFlag =
+                info.Proxy === "1" ||
+                (typeof info.Implementation === "string" &&
+                  info.Implementation.length > 10) ||
+                (hasSrc &&
+                  /\bERC1967\b|\bTransparentUpgradeable\b|\bUUPS\b|\bBeaconProxy\b/.test(
+                    src
+                  ));
+              liveProxy = proxyFlag;
+              logInfo(
+                "proxy: " + (proxyFlag ? "yes (upgradeable)" : "no (immutable)")
+              );
+            } else {
+              logEnd("etherscan returned no data", false);
+            }
+          } catch (e) {
+            if (stale()) return;
+            logEnd("source: " + (e.message || "failed"), false);
+          }
+        } else {
+          // no API key: try sourcify for source, RPC for proxy
+          logStart("sourcify (source code) ...");
+          try {
+            var srcText = await sourcifyFetch(addr);
+            if (stale()) return;
+            if (srcText) {
+              liveUnver = false;
+              var sLines = countLoc(srcText);
+              liveLoc = sLines;
+              logEnd("verified: " + sLines.toLocaleString() + " LOC [sourcify]", true);
+              if (ct && ct.knownLoc && Math.abs(sLines - ct.knownLoc) / ct.knownLoc > 0.3) {
+                logInfo("known LOC was " + ct.knownLoc + " \u2014 live count used");
+              }
+            } else {
+              // fallback: use bytecode length as complexity proxy
+              var code = await rpcCall("eth_getCode", [addr, "latest"]);
+              if (stale()) return;
+              if (code && code !== "0x") {
+                var byteLen = (code.length - 2) / 2; // hex chars to bytes
+                var estLoc = Math.round(byteLen / 7); // ~7 bytes per LOC heuristic
+                liveLoc = estLoc;
+                liveUnver = true;
+                logEnd("not on sourcify \u2014 bytecode " + byteLen + "B (\u2248" + estLoc + " LOC)", false);
+              } else {
+                logEnd("no code at address (EOA?)", false);
+              }
+            }
+          } catch (e) {
+            if (stale()) return;
+            logEnd("source: " + (e.message || "failed"), false);
+          }
+          if (stale()) return;
+
+          // proxy via EIP-1967 storage slot
+          logStart("proxy detection [EIP-1967] ...");
+          try {
+            var isP = await rpcIsProxy(addr);
+            if (stale()) return;
+            liveProxy = isP;
+            logEnd(
+              "proxy: " + (isP ? "yes (EIP-1967)" : "no (immutable)") + " [rpc]",
+              true
+            );
+          } catch (e) {
+            if (stale()) return;
+            logEnd("proxy check: " + (e.message || "failed"), false);
+          }
+        }
+
+        render();
+      }
+
+      // ─── RESOLVE PARAMS ────────────────────────────────────
+      function getParams() {
+        var ct = isCustom ? null : CONTRACTS[sel];
+        var cType = ct ? ct.type : customType;
+
+        if (ct) {
+          var ethVal;
+          if (cType === "router") {
+            ethVal = routerVol !== null ? routerVol : ct.fallbackEth;
+          } else {
+            ethVal = liveEth !== null ? liveEth : ct.fallbackEth;
+          }
+          return {
+            days: liveDeploy ? liveDeploy.days : daysSince(ct.deployed),
+            eth: ethVal,
+            loc: liveLoc !== null ? liveLoc : ct.knownLoc,
+            proxy: liveProxy !== null ? liveProxy : ct.knownProxy,
+            unverified: liveUnver !== null ? liveUnver : false,
+            type: cType,
+          };
+        }
+        // custom address — no fallback data
+        return {
+          days: liveDeploy ? liveDeploy.days : 0,
+          eth: (cType === "router" ? routerVol : liveEth) || 0,
+          loc: liveLoc !== null ? liveLoc : 500,
+          proxy: liveProxy !== null ? liveProxy : false,
+          unverified: liveUnver !== null ? liveUnver : true,
+          type: cType,
+        };
+      }
+
+      // ─── RENDER ────────────────────────────────────────────
+      function render() {
+        var ct = isCustom ? null : CONTRACTS[sel];
+        var addr = isCustom ? customAddr.trim() : ct ? ct.addr : "";
+        var p = getParams();
+        var r = computeScore(p);
+
+        // separators
+        document.querySelectorAll(".sep").forEach(function (el) {
+          el.textContent = "\u2500".repeat(50);
+        });
+
+        // ── contract list ──
+        var listEl = document.getElementById("contract-list");
+        listEl.innerHTML = "";
+        CONTRACTS.forEach(function (c, i) {
+          var active = !isCustom && sel === i;
+          var btn = document.createElement("button");
+          btn.className = "row";
+          btn.style.color = active ? "var(--hi)" : "";
+          var marker = active ? "> " : "  ";
+          var mClr = active ? "var(--hi)" : "var(--dim)";
+          var tags = "";
+          if (c.type === "router") tags += '<span class="tag">[router]</span>';
+          if (c.knownProxy) tags += '<span class="tag">[proxy]</span>';
+          btn.innerHTML =
+            '<span style="color:' +
+            mClr +
+            '">' +
+            marker +
+            "</span>" +
+            esc(c.name) +
+            '<span class="addr">' +
+            fA(c.addr) +
+            "</span>" +
+            tags;
+          btn.onclick = function () {
+            sel = i;
+            isCustom = false;
+            render();
+            scheduleQuery();
+          };
+          listEl.appendChild(btn);
+        });
+
+        // custom button
+        var cBtn = document.getElementById("custom-btn");
+        cBtn.innerHTML =
+          '<span style="color:' +
+          (isCustom ? "var(--hi)" : "var(--dim)") +
+          '">' +
+          (isCustom ? "> " : "  ") +
+          "</span>custom";
+        document.getElementById("custom-box").style.display = isCustom
+          ? "block"
+          : "none";
+
+        // etherscan key toggle
+        var kl = document.getElementById("key-toggle");
+        kl.textContent =
+          (showKey ? "[-]" : "[+]") +
+          " etherscan api key " +
+          (apiKey ? "(set)" : "(optional \u2014 router volume, faster lookups)");
+        document.getElementById("key-input").style.display = showKey
+          ? "block"
+          : "none";
+
+        // ── query log ──
+        var logBox = document.getElementById("log-box");
+        if (logItems.length === 0) {
+          logBox.innerHTML =
+            '<div class="dim" style="font-size:11px;padding-left:28px">waiting...</div>';
+        } else {
+          logBox.innerHTML = logItems
+            .map(function (l) {
+              var cls = l.loading
+                ? "dim"
+                : l.ok === true
+                ? "ok"
+                : l.ok === false
+                ? "err"
+                : "info";
+              var icon = l.loading
+                ? ".."
+                : l.ok === true
+                ? "ok"
+                : l.ok === false
+                ? "xx"
+                : "--";
+              return (
+                '<div class="log-line"><span class="log-icon ' +
+                cls +
+                '">' +
+                icon +
+                "</span>" +
+                '<span class="log-msg' +
+                (l.loading ? " dim" : "") +
+                '">' +
+                esc(l.msg) +
+                "</span></div>"
+              );
+            })
+            .join("");
+        }
+
+        // ── resolved params ──
+        var ethLabel = p.type === "router" ? "vol/day" : "tvl";
+        var ethSrc =
+          p.type === "router"
+            ? routerVol !== null
+              ? "etherscan"
+              : ct
+              ? "fallback"
+              : "none"
+            : liveEth !== null
+            ? "live rpc"
+            : ct
+            ? "fallback"
+            : "none";
+        var locSrc = liveLoc !== null ? "etherscan" : ct ? "known" : "default";
+        var ageSrc = liveDeploy ? "verified" : ct ? "known" : "none";
+
+        var res = "";
+        res +=
+          '<span class="dim">  addr      </span><span class="mid">' +
+          fA(addr) +
+          "</span>\n";
+        res +=
+          '<span class="dim">  type      </span><span class="mid">' +
+          p.type +
+          "</span>\n";
+        res +=
+          '<span class="dim">  age       </span><span class="hi">' +
+          fD(p.days) +
+          "</span>";
+        res += '<span class="dim"> (' + ageSrc + ")</span>\n";
+        res +=
+          '<span class="dim">  ' +
+          rpad(ethLabel, 10) +
+          '</span><span class="hi">' +
+          fE(p.eth) +
+          " ETH</span>";
+        res += '<span class="dim"> (' + ethSrc + ")</span>\n";
+        res +=
+          '<span class="dim">  loc       </span><span class="hi">' +
+          p.loc.toLocaleString() +
+          "</span>";
+        res += '<span class="dim"> (' + locSrc + ")</span>";
+        if (p.unverified) res += '<span class="err"> UNVERIFIED</span>';
+        res += "\n";
+        res += '<span class="dim">  proxy     </span>';
+        res +=
+          '<span class="' +
+          (p.proxy ? "err" : "ok") +
+          '">' +
+          (p.proxy ? "yes" : "no") +
+          "</span>";
+        document.getElementById("resolved-out").innerHTML = res;
+
+        // ── score display ──
+        var grade =
+          r.final >= 85
+            ? "BATTLE-HARDENED"
+            : r.final >= 65
+            ? "ESTABLISHED"
+            : r.final >= 40
+            ? "MATURING"
+            : r.final >= 20
+            ? "EARLY"
+            : "UNPROVEN";
+        var scoreEl = document.getElementById("score-num");
+        var gradeEl = document.getElementById("score-grade");
+        if (r.final >= 65) {
+          // lindy badge for established+ contracts
+          var tier = r.final >= 85 ? "hi" : "ok";
+          var corner = r.final >= 85 ? "\u2554\u2550\u2557" : "\u250C\u2500\u2510";
+          var wall = r.final >= 85 ? "\u2551" : "\u2502";
+          var floor = r.final >= 85 ? "\u255A\u2550\u255D" : "\u2514\u2500\u2518";
+          var hBar = r.final >= 85 ? "\u2550" : "\u2500";
+          var badge = "";
+          badge += '<span class="dim">' + corner[0] + hBar.repeat(19) + corner[2] + "</span>\n";
+          badge += '<span class="dim">' + wall + "</span>";
+          badge += '<span class="' + tier + '">   L I N D Y       </span>';
+          badge += '<span class="dim">' + wall + "</span>\n";
+          badge += '<span class="dim">' + wall + "</span>";
+          badge += '<span class="' + tier + '">     ' + pad(r.final.toFixed(1), 5) + "         </span>";
+          badge += '<span class="dim">' + wall + "</span>\n";
+          badge += '<span class="dim">' + floor[0] + hBar.repeat(19) + floor[2] + "</span>";
+          scoreEl.innerHTML = badge;
+          scoreEl.style.fontSize = "13px";
+          gradeEl.textContent = grade;
+        } else {
+          scoreEl.textContent = r.final.toFixed(1);
+          scoreEl.style.fontSize = "36px";
+          gradeEl.textContent = grade;
+        }
+        document.getElementById("score-bar").textContent =
+          "[" + bar(r.final / 99) + "]";
+        document.getElementById("score-axis").textContent =
+          "0                       99";
+
+        // ── factor breakdown ──
+        var vLbl = rpad(ethLabel + "    ", 10);
+        var bd = "";
+        bd += '<span class="dim">  T  time       </span>' + bar(r.T, 18);
+        bd +=
+          '<span class="mid"> ' + pad((r.T * 100).toFixed(0), 3) + "%</span>\n";
+        bd += '<span class="dim">  V  ' + vLbl + "</span>" + bar(r.V, 18);
+        bd +=
+          '<span class="mid"> ' + pad((r.V * 100).toFixed(0), 3) + "%</span>\n";
+        bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
+        bd +=
+          '<span class="dim">  \u221a(T\u00d7V)  base  </span>' +
+          bar(r.base / 100, 18);
+        bd += '<span class="mid"> ' + pad(r.base.toFixed(1), 4) + "</span>\n";
+        bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
+        bd += '<span class="dim">  C  complexity </span>';
+        bd += '<span class="' + (r.Cm >= 1 ? "ok" : "err") + '">';
+        bd += " \u00d7" + r.Cm.toFixed(3) + "</span>";
+        bd += '<span class="dim">  ' + p.loc + " LOC</span>\n";
+        bd += '<span class="dim">  P  proxy      </span>';
+        bd += '<span class="' + (r.P < 1 ? "err" : "ok") + '">';
+        bd += " \u00d7" + r.P.toFixed(2) + "</span>";
+        bd +=
+          '<span class="dim">  ' +
+          (p.proxy ? "upgradeable" : "immutable") +
+          "</span>";
+        if (p.unverified) {
+          bd += '\n<span class="dim">  U  unverified </span>';
+          bd += '<span class="err"> \u00d7' + r.Uv.toFixed(2) + "</span>";
+          bd += '<span class="dim">  source not verified</span>';
+        }
+        document.getElementById("breakdown").innerHTML = bd;
+
+        // ── formula ──
+        var vCapLabel = p.type === "router" ? "50K" : "500K";
+        var fm = "";
+        fm += "  T = min(1, ln(1+days) / ln(1+" + TIME_CAP + "))\n";
+        fm += "  V = min(1, ln(1+eth)  / ln(1+" + vCapLabel + "))\n";
+        fm += "  C = 1 / (LOC/" + LOC_REF + ")^" + C_EXP + "\n";
+        fm +=
+          "  P = " +
+          (p.proxy ? P_PENALTY + "  (upgradeable)" : "1.00  (immutable)") +
+          "\n";
+        if (p.unverified)
+          fm += "  U = " + U_PENALTY + "  (source unverified)\n";
+        fm += "\n";
+        fm += "  score = \u221a(T \u00d7 V) \u00d7 100 \u00d7 C \u00d7 P";
+        if (p.unverified) fm += " \u00d7 U";
+        document.getElementById("formula-out").textContent = fm;
+
+        // ── methodology notes ──
+        var notes = "";
+        notes += "  survivorship heuristic \u2014 not an audit\n";
+        notes += "  all inputs deterministic + verifiable:\n\n";
+        notes += "  T  deploy block timestamp (rpc bisect\n";
+        notes += "     or etherscan getcontractcreation)\n";
+        notes += "  V  ETH + ERC20 TVL via Multicall3 (escrow)\n";
+        notes += "     min(now, 7d, 30d) resists flash deposits\n";
+        notes += "     txlistinternal 30d volume (routers)\n";
+        notes += "  C  verified source LOC (sourcify or\n";
+        notes += "     etherscan). simpler = higher score\n";
+        notes += "  P  EIP-1967 proxy slot or etherscan flag\n";
+        notes += "  U  unverified source penalty\n\n";
+        notes += "  geometric mean: both time and value\n";
+        notes += "  must be strong. log scaling gives\n";
+        notes += "  diminishing returns. cap at 99.\n\n";
+        notes += "  escrow V saturates at " + fE(V_CAP_E) + " ETH\n";
+        notes += "  router V saturates at " + fE(V_CAP_R) + " ETH/day";
+        document.getElementById("notes-out").textContent = notes;
+
+        // ── footer ──
+        var fp =
+          "rpc " +
+          (usedRpc || RPC_LIST[0].replace("https://", "").split("/")[0]);
+        if (apiKey) fp += " | etherscan v2";
+        else fp += " | sourcify";
+        fp += " | multicall3";
+        document.getElementById("footer").textContent = fp;
+      }
+
+      // ─── EVENTS ────────────────────────────────────────────
+      var queryTimer = null;
+      function scheduleQuery() {
+        clearTimeout(queryTimer);
+        queryTimer = setTimeout(runQuery, 400);
+      }
+
+      document.getElementById("custom-btn").onclick = function () {
+        isCustom = true;
+        render();
+        document.getElementById("custom-input").focus();
+      };
+
+      document.getElementById("custom-input").oninput = function (e) {
+        customAddr = e.target.value;
+        if (customAddr.trim().length === 42) scheduleQuery();
+      };
+
+      document.getElementById("custom-type").onchange = function (e) {
+        customType = e.target.value;
+        if (customAddr.trim().length === 42) scheduleQuery();
+        render();
+      };
+
+      document.getElementById("key-toggle").onclick = function () {
+        showKey = !showKey;
+        render();
+        if (showKey) document.getElementById("key-input").focus();
+      };
+
+      document.getElementById("key-input").oninput = function (e) {
+        apiKey = e.target.value.trim();
+        render();
+        // re-query if key looks valid (etherscan keys are 34 chars)
+        if (apiKey.length >= 30) scheduleQuery();
+      };
+
+      // ─── INIT ──────────────────────────────────────────────
+      render();
+      scheduleQuery();
+    </script>
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"8510b592df8f4a69b87bbf8e840f200c","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
