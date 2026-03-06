@@ -375,7 +375,7 @@
           deployed: "2017-12-01",
           knownLoc: 62,
           knownProxy: false,
-          fallbackEth: 3200000,
+          fallbackEth: 2100000,
           desc: "canonical wrapped ether",
         },
         {
@@ -386,7 +386,7 @@
           deployed: "2020-11-04",
           knownLoc: 285,
           knownProxy: false,
-          fallbackEth: 34000000,
+          fallbackEth: 81000000,
           desc: "eth2 staking deposit",
         },
         {
@@ -397,7 +397,7 @@
           deployed: "2020-05-18",
           knownLoc: 468,
           knownProxy: false,
-          fallbackEth: 15000,
+          fallbackEth: 1500,
           desc: "swap router",
         },
         {
@@ -408,7 +408,7 @@
           deployed: "2021-05-05",
           knownLoc: 780,
           knownProxy: false,
-          fallbackEth: 25000,
+          fallbackEth: 350,
           desc: "concentrated liquidity",
         },
         {
@@ -419,7 +419,7 @@
           deployed: "2025-01-23",
           knownLoc: 3500,
           knownProxy: false,
-          fallbackEth: 20000,
+          fallbackEth: 46000,
           desc: "singleton pool manager",
         },
         {
@@ -428,9 +428,9 @@
           addr: "0x0000000000001fF3684f28c67538d4D072C22734",
           type: "router",
           deployed: "2024-03-01",
-          knownLoc: 3500,
+          knownLoc: 325,
           knownProxy: false,
-          fallbackEth: 500,
+          fallbackEth: 6000,
           desc: "dex aggregator (0x/matcha)",
         },
         {
@@ -1153,7 +1153,6 @@
                 var nSample = Math.min(RECEIPT_SAMPLE, inbound.length);
                 var totalSampleEth = 0;
                 var sampledOk = 0;
-                logInfo("fetching " + nSample + " receipts ...");
                 for (var si = 0; si < nSample; si++) {
                   var rcpt = await rpcCall("eth_getTransactionReceipt", [inbound[si].hash]);
                   if (stale()) return;
@@ -1552,7 +1551,7 @@
             : ct
             ? "fallback"
             : "none";
-        var locSrc = liveLoc !== null ? "etherscan" : ct ? "known" : "default";
+        var locSrc = liveLoc !== null ? (apiKey ? "etherscan" : "sourcify") : ct ? "known" : "default";
         var ageSrc = liveDeploy ? "verified" : ct ? "known" : "none";
 
         var res = "";
