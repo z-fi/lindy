@@ -16,8 +16,8 @@ It combines two core signals — **time survived** and **value at stake** — th
 **Time (T)** — Days since contract deployment. Found by binary-searching for the first block with code at the address. Log-scaled and capped at ~7 years.
 
 **Value (V)** — How much is on the line.
-- *Escrow contracts*: ETH + stablecoin balances (USDC, USDT, DAI, WETH). Uses the **minimum** balance across three checkpoints (now, 7d ago, 30d ago) to resist flash deposits.
-- *Router contracts*: Daily ETH volume from internal transactions over a 30-day window.
+- *Escrow contracts*: ETH + ERC20 balances (USDC, USDT, DAI, WETH) priced via Chainlink ETH/USD oracle. Uses the **minimum** balance across three checkpoints (now, 7d ago, 30d ago) — each checkpoint queries both ETH and ERC20 via Multicall3 to resist flash deposits.
+- *Router contracts*: Daily throughput from both ETH internal transactions (`txlistinternal`) and ERC20 transfers (`tokentx`) over a 30-day window. When the 10K record cap is hit, the sample time span is measured and volume is extrapolated to a daily rate.
 
 Log-scaled so the difference between 0 and 100 ETH matters more than between 100k and 200k ETH.
 

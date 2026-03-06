@@ -275,13 +275,19 @@
 
       <div style="margin-top: 10px">
         <button class="link" id="key-toggle">[+] etherscan api key</button>
-        <input
-          class="field key"
-          id="key-input"
-          placeholder="  paste free etherscan api key"
-          spellcheck="false"
-          style="display: none"
-        />
+        <div id="key-box" style="display: none">
+          <input
+            class="field key"
+            id="key-input"
+            placeholder="  paste free etherscan api key"
+            spellcheck="false"
+          />
+          <div style="font-size: 10px; margin-top: 4px; padding-left: 16px">
+            <a class="zfi" href="https://etherscan.io/myapikey" target="_blank" rel="noopener"
+              >get a free key</a>
+            <span class="dim"> &mdash; required for router volume scoring</span>
+          </div>
+        </div>
       </div>
 
       <pre class="sep"></pre>
@@ -327,7 +333,8 @@
       //
       // data sources (no API key needed):
       //   balance  → Multicall3: getEthBalance + ERC20 balanceOf
-      //   history  → eth_getBalance at 7d/30d blocks (min)
+      //   price    → Chainlink ETH/USD oracle (via Multicall3)
+      //   history  → Multicall3 at 7d/30d blocks (ETH + ERC20 min)
       //   deploy   → RPC binary search on eth_getCode
       //   LOC      → Sourcify (fallback: bytecode length)
       //   proxy    → eth_getStorageAt EIP-1967 slot
@@ -338,7 +345,7 @@
       //   deploy   → getcontractcreation (faster)
       //   LOC      → getsourcecode (more coverage)
       //   proxy    → getsourcecode Proxy field
-      //   volume   → txlistinternal (routers only)
+      //   volume   → txlistinternal + tokentx (routers)
       // ═══════════════════════════════════════════════════════
 
       // ─── PUBLIC RPCs (no api key, tried in order) ──────────
@@ -416,6 +423,17 @@
           desc: "singleton pool manager",
         },
         {
+          id: "matcha",
+          name: "Matcha 0x Router",
+          addr: "0x0000000000001fF3684f28c67538d4D072C22734",
+          type: "router",
+          deployed: "2024-03-01",
+          knownLoc: 3500,
+          knownProxy: false,
+          fallbackEth: 500,
+          desc: "dex aggregator (0x/matcha)",
+        },
+        {
           id: "zamm",
           name: "zAMM",
           addr: "0x000000000000040470635EB91b7CE4D132D616eD",
@@ -461,17 +479,19 @@
 
       // ─── TOP ERC20s FOR TVL DETECTION ─────────────────────
       // balanceOf(address) selector = 0x70a08231
-      // conservative ETH prices (underestimates are safer)
+      // ethPrice set live via Chainlink oracle; static values unused
       var TOP_TOKENS = [
-        { symbol: "USDC", addr: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, ethPrice: 0.0004 },
-        { symbol: "USDT", addr: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6, ethPrice: 0.0004 },
-        { symbol: "DAI",  addr: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18, ethPrice: 0.0004 },
-        { symbol: "WETH", addr: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18, ethPrice: 1.0 },
+        { symbol: "USDC", addr: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
+        { symbol: "USDT", addr: "0xdAC17F958D2ee523a2206206994597C13D831ec7", decimals: 6 },
+        { symbol: "DAI",  addr: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18 },
+        { symbol: "WETH", addr: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 },
       ];
       var BALANCE_OF_SEL = "0x70a08231"; // balanceOf(address)
       var GET_ETH_BAL_SEL = "0x4d2301cc"; // getEthBalance(address)
+      var LATEST_ANSWER_SEL = "0x50d25bcd"; // latestAnswer()
 
       var MC3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
+      var CHAINLINK_ETH_USD = "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419";
 
       // ─── STATE ─────────────────────────────────────────────
       var sel = 0;
@@ -536,7 +556,7 @@
       function computeScore(p) {
         var days = p.days || 0;
         var eth = p.eth || 0;
-        var loc = Math.max(p.loc || 100, 10);
+        var loc = Math.max(p.loc || 100, 50);
         var T = Math.min(1, Math.log(1 + days) / Math.log(1 + TIME_CAP));
         var vCap = p.type === "router" ? V_CAP_R : V_CAP_E;
         var V = Math.min(1, Math.log(1 + eth) / Math.log(1 + vCap));
@@ -552,11 +572,7 @@
           Cm: Cm,
           P: P,
           Uv: Uv,
-          vCap: vCap,
           final: Math.min(99, Math.max(0, raw)),
-          days: days,
-          eth: eth,
-          loc: loc,
         };
       }
 
@@ -847,13 +863,18 @@
           return myId !== queryId;
         }
 
-        // ── 1) ETH + ERC20 balances via Multicall3 (1 RPC call) ──
-        logStart("multicall3: ETH + ERC20 balances ...");
+        // ── 1) ETH + ERC20 balances + ETH/USD price via Multicall3 (1 RPC call) ──
+        logStart("multicall3: ETH + ERC20 + oracle ...");
         var balNow = 0;
+        var stableEthPrice = 0.0004; // fallback ~$2500
+        var tokenPrices = TOP_TOKENS.map(function (tok) {
+          return tok.symbol === "WETH" ? 1.0 : stableEthPrice;
+        });
         try {
           var padAddr = addr.toLowerCase().slice(2).padStart(64, "0");
           var calls = [
             { target: MC3, allowFailure: true, data: GET_ETH_BAL_SEL + padAddr },
+            { target: CHAINLINK_ETH_USD, allowFailure: true, data: LATEST_ANSWER_SEL },
           ];
           if (cType === "escrow") {
             for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
@@ -871,17 +892,29 @@
           if (results[0].success) {
             balNow = Number(BigInt(results[0].data)) / 1e18;
           }
+          // decode Chainlink ETH/USD (index 1) — 8 decimals
+          if (results[1].success && results[1].data && results[1].data.length > 2) {
+            var ethUsd = Number(BigInt(results[1].data)) / 1e8;
+            if (ethUsd > 100) {
+              stableEthPrice = 1 / ethUsd;
+              logInfo("ETH/USD: $" + ethUsd.toFixed(0) + " (chainlink live)");
+            }
+          }
+          // update token ethPrices with live oracle rate
+          tokenPrices = TOP_TOKENS.map(function (tok) {
+            return tok.symbol === "WETH" ? 1.0 : stableEthPrice;
+          });
           if (cType === "escrow") {
             liveEth = balNow;
-            // decode ERC20 balances (indices 1..4)
+            // decode ERC20 balances (indices 2..5)
             var tokenEth = 0;
             var tokenParts = [];
             for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
-              var r = results[ti + 1];
+              var r = results[ti + 2];
               if (r.success && r.data && r.data !== "0x" && r.data.length > 2) {
                 var tok = TOP_TOKENS[ti];
                 var raw = Number(BigInt(r.data)) / Math.pow(10, tok.decimals);
-                var inEth = raw * tok.ethPrice;
+                var inEth = raw * tokenPrices[ti];
                 if (inEth > 0.1) {
                   tokenEth += inEth;
                   tokenParts.push(tok.symbol + ":" + fE(inEth));
@@ -944,26 +977,47 @@
         }
         if (stale()) return;
 
-        // ── 2a) escrow: min balance over 30d window ──
-        if (cType === "escrow" && (block7 || block30)) {
-          logStart("historical balances ...");
+        // ── 2a) escrow: min balance (ETH + ERC20) over 30d window ──
+        if (cType === "escrow" && liveEth !== null && (block7 || block30)) {
+          logStart("historical balances (ETH + ERC20) ...");
           try {
-            var bals = [balNow];
-            if (block7) {
-              var h7 = await rpcCall("eth_getBalance", [addr, "0x" + block7.toString(16)]);
+            var totals = [liveEth]; // current total already includes ERC20
+            var histBlocks = [];
+            if (block30) histBlocks.push(block30);
+            if (block7) histBlocks.push(block7);
+            for (var hi = 0; hi < histBlocks.length; hi++) {
+              var blockHex = "0x" + histBlocks[hi].toString(16);
+              var hCalls = [
+                { target: MC3, allowFailure: true, data: GET_ETH_BAL_SEL + padAddr },
+              ];
+              for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+                hCalls.push({
+                  target: TOP_TOKENS[ti].addr,
+                  allowFailure: true,
+                  data: BALANCE_OF_SEL + padAddr,
+                });
+              }
+              var hResults = await mc3Call(hCalls, blockHex);
               if (stale()) return;
-              bals.push(Number(BigInt(h7)) / 1e18);
+              var hTotal = 0;
+              if (hResults[0].success) {
+                hTotal = Number(BigInt(hResults[0].data)) / 1e18;
+              }
+              for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+                var r = hResults[ti + 1];
+                if (r.success && r.data && r.data !== "0x" && r.data.length > 2) {
+                  var tok = TOP_TOKENS[ti];
+                  var raw = Number(BigInt(r.data)) / Math.pow(10, tok.decimals);
+                  hTotal += raw * tokenPrices[ti];
+                }
+              }
+              totals.push(hTotal);
             }
-            if (block30) {
-              var h30 = await rpcCall("eth_getBalance", [addr, "0x" + block30.toString(16)]);
-              if (stale()) return;
-              bals.push(Number(BigInt(h30)) / 1e18);
-            }
-            var minBal = Math.min.apply(null, bals);
+            var minBal = Math.min.apply(null, totals);
             liveEth = minBal;
             logEnd(
-              "min(" + bals.map(function (b) { return fE(b); }).join(", ") +
-                ") = " + fE(minBal) + " ETH",
+              "min(" + totals.map(function (b) { return fE(b); }).join(", ") +
+                ") = " + fE(minBal) + " ETH equiv",
               true
             );
           } catch (e) {
@@ -1003,13 +1057,25 @@
                   totalWei += BigInt(txs[ti].value);
                 }
                 var totalEth = Number(totalWei) / 1e18;
-                routerVol = totalEth / 30;
+                // extrapolate if 10K cap was hit (sample covers less than 30d)
+                var sampleDays = 30;
+                var extraNote = "";
+                if (rv.result.length >= 10000) {
+                  var earliest = parseInt(rv.result[rv.result.length - 1].timeStamp);
+                  var latest = parseInt(rv.result[0].timeStamp);
+                  var spanSec = latest - earliest;
+                  if (spanSec > 0) {
+                    sampleDays = spanSec / 86400;
+                    extraNote = ", ~" + sampleDays.toFixed(1) + "d sample";
+                  }
+                }
+                routerVol = totalEth / sampleDays;
                 logEnd(
                   "~" +
                     fE(routerVol) +
                     " ETH/day (" +
                     txs.length +
-                    " out txs, 30d window)",
+                    " out txs" + extraNote + ")",
                   true
                 );
                 if (ct && Math.abs(routerVol - ct.fallbackEth) / Math.max(ct.fallbackEth, 1) > 0.5) {
@@ -1026,7 +1092,92 @@
             logEnd("volume: " + (e.message || "failed"), false);
           }
         } else if (cType === "router" && !apiKey) {
-          logInfo("router volume needs etherscan key \u2014 using fallback");
+          if (ct && ct.fallbackEth) {
+            logInfo("router volume needs etherscan key \u2014 using fallback");
+          } else {
+            logInfo("router volume needs etherscan key \u2014 using balance");
+            routerVol = balNow;
+          }
+        }
+        if (stale()) return;
+
+        // ── 2c) router: ERC20 volume via tokentx (etherscan only) ──
+        if (cType === "router" && apiKey) {
+          logStart("tokentx (30d ERC20 volume) ...");
+          try {
+            var tv = await escanFetch({
+              module: "account",
+              action: "tokentx",
+              address: addr,
+              startblock: block30 || 0,
+              endblock: 99999999,
+              page: 1,
+              offset: 10000,
+              sort: "desc",
+            });
+            if (stale()) return;
+            if (tv.result && Array.isArray(tv.result) && tv.result.length > 0) {
+              var addrLower = addr.toLowerCase();
+              var tokenLookup = {};
+              for (var ti = 0; ti < TOP_TOKENS.length; ti++) {
+                var t = TOP_TOKENS[ti];
+                tokenLookup[t.addr.toLowerCase()] = {
+                  symbol: t.symbol, decimals: t.decimals,
+                  ethPrice: tokenPrices[ti],
+                };
+              }
+              var ttxs = tv.result.filter(function (tx) {
+                return tx.from.toLowerCase() === addrLower &&
+                  tokenLookup[tx.contractAddress.toLowerCase()];
+              });
+              var byToken = {};
+              for (var i = 0; i < ttxs.length; i++) {
+                var ca = ttxs[i].contractAddress.toLowerCase();
+                if (!byToken[ca]) byToken[ca] = BigInt(0);
+                byToken[ca] += BigInt(ttxs[i].value);
+              }
+              // extrapolate if 10K cap was hit
+              var tSampleDays = 30;
+              var tExtraNote = "";
+              if (tv.result.length >= 10000) {
+                var tEarliest = parseInt(tv.result[tv.result.length - 1].timeStamp);
+                var tLatest = parseInt(tv.result[0].timeStamp);
+                var tSpanSec = tLatest - tEarliest;
+                if (tSpanSec > 0) {
+                  tSampleDays = tSpanSec / 86400;
+                  tExtraNote = ", ~" + tSampleDays.toFixed(1) + "d sample";
+                }
+              }
+              var tokenVolEth = 0;
+              var tokenVolParts = [];
+              for (var ca in byToken) {
+                var tok = tokenLookup[ca];
+                var raw = Number(byToken[ca]) / Math.pow(10, tok.decimals);
+                var inEth = raw * tok.ethPrice;
+                if (inEth > 0.1) {
+                  tokenVolEth += inEth;
+                  tokenVolParts.push(tok.symbol + ":" + fE(inEth / tSampleDays));
+                }
+              }
+              if (tokenVolEth > 0) {
+                var tokenVolDay = tokenVolEth / tSampleDays;
+                if (routerVol !== null) routerVol += tokenVolDay;
+                else routerVol = tokenVolDay;
+                logEnd(
+                  "+" + fE(tokenVolDay) + " ETH/day ERC20 (" +
+                    tokenVolParts.join(", ") + tExtraNote + ")",
+                  true
+                );
+              } else {
+                logEnd("no known ERC20 volume in 30d", false);
+              }
+            } else {
+              logEnd("no token txs in 30d window", false);
+            }
+          } catch (e) {
+            if (stale()) return;
+            logEnd("tokentx: " + (e.message || "failed"), false);
+          }
         }
         if (stale()) return;
 
@@ -1323,7 +1474,7 @@
           (showKey ? "[-]" : "[+]") +
           " etherscan api key " +
           (apiKey ? "(set)" : "(optional \u2014 router volume, faster lookups)");
-        document.getElementById("key-input").style.display = showKey
+        document.getElementById("key-box").style.display = showKey
           ? "block"
           : "none";
 
@@ -1370,7 +1521,7 @@
         var ethSrc =
           p.type === "router"
             ? routerVol !== null
-              ? "etherscan"
+              ? apiKey ? "etherscan" : "balance"
               : ct
               ? "fallback"
               : "none"
@@ -1420,6 +1571,7 @@
         document.getElementById("resolved-out").innerHTML = res;
 
         // ── score display ──
+        var isLoading = logItems.some(function (l) { return l.loading; });
         var grade =
           r.final >= 85
             ? "BATTLE-HARDENED"
@@ -1432,7 +1584,11 @@
             : "UNPROVEN";
         var scoreEl = document.getElementById("score-num");
         var gradeEl = document.getElementById("score-grade");
-        if (r.final >= 65) {
+        if (isLoading) {
+          scoreEl.textContent = "...";
+          scoreEl.style.fontSize = "36px";
+          gradeEl.textContent = "LOADING";
+        } else if (r.final >= 65) {
           // lindy badge for established+ contracts
           var tier = r.final >= 85 ? "hi" : "ok";
           var corner = r.final >= 85 ? "\u2554\u2550\u2557" : "\u250C\u2500\u2510";
@@ -1456,41 +1612,45 @@
           scoreEl.style.fontSize = "36px";
           gradeEl.textContent = grade;
         }
-        document.getElementById("score-bar").textContent =
-          "[" + bar(r.final / 99) + "]";
-        document.getElementById("score-axis").textContent =
-          "0                       99";
+        document.getElementById("score-bar").textContent = isLoading
+          ? ""
+          : "[" + bar(r.final / 99) + "]";
+        document.getElementById("score-axis").textContent = isLoading
+          ? ""
+          : "0                       99";
 
         // ── factor breakdown ──
-        var vLbl = rpad(ethLabel + "    ", 10);
         var bd = "";
-        bd += '<span class="dim">  T  time       </span>' + bar(r.T, 18);
-        bd +=
-          '<span class="mid"> ' + pad((r.T * 100).toFixed(0), 3) + "%</span>\n";
-        bd += '<span class="dim">  V  ' + vLbl + "</span>" + bar(r.V, 18);
-        bd +=
-          '<span class="mid"> ' + pad((r.V * 100).toFixed(0), 3) + "%</span>\n";
-        bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
-        bd +=
-          '<span class="dim">  \u221a(T\u00d7V)  base  </span>' +
-          bar(r.base / 100, 18);
-        bd += '<span class="mid"> ' + pad(r.base.toFixed(1), 4) + "</span>\n";
-        bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
-        bd += '<span class="dim">  C  complexity </span>';
-        bd += '<span class="' + (r.Cm >= 1 ? "ok" : "err") + '">';
-        bd += " \u00d7" + r.Cm.toFixed(3) + "</span>";
-        bd += '<span class="dim">  ' + p.loc + " LOC</span>\n";
-        bd += '<span class="dim">  P  proxy      </span>';
-        bd += '<span class="' + (r.P < 1 ? "err" : "ok") + '">';
-        bd += " \u00d7" + r.P.toFixed(2) + "</span>";
-        bd +=
-          '<span class="dim">  ' +
-          (p.proxy ? "upgradeable" : "immutable") +
-          "</span>";
-        if (p.unverified) {
-          bd += '\n<span class="dim">  U  unverified </span>';
-          bd += '<span class="err"> \u00d7' + r.Uv.toFixed(2) + "</span>";
-          bd += '<span class="dim">  source not verified</span>';
+        if (!isLoading) {
+          var vLbl = rpad(ethLabel + "    ", 10);
+          bd += '<span class="dim">  T  time       </span>' + bar(r.T, 18);
+          bd +=
+            '<span class="mid"> ' + pad((r.T * 100).toFixed(0), 3) + "%</span>\n";
+          bd += '<span class="dim">  V  ' + vLbl + "</span>" + bar(r.V, 18);
+          bd +=
+            '<span class="mid"> ' + pad((r.V * 100).toFixed(0), 3) + "%</span>\n";
+          bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
+          bd +=
+            '<span class="dim">  \u221a(T\u00d7V)  base  </span>' +
+            bar(r.base / 100, 18);
+          bd += '<span class="mid"> ' + pad(r.base.toFixed(1), 4) + "</span>\n";
+          bd += '<span class="dim">  ' + "\u2500".repeat(40) + "</span>\n";
+          bd += '<span class="dim">  C  complexity </span>';
+          bd += '<span class="' + (r.Cm >= 1 ? "ok" : "err") + '">';
+          bd += " \u00d7" + r.Cm.toFixed(3) + "</span>";
+          bd += '<span class="dim">  ' + p.loc + " LOC</span>\n";
+          bd += '<span class="dim">  P  proxy      </span>';
+          bd += '<span class="' + (r.P < 1 ? "err" : "ok") + '">';
+          bd += " \u00d7" + r.P.toFixed(2) + "</span>";
+          bd +=
+            '<span class="dim">  ' +
+            (p.proxy ? "upgradeable" : "immutable") +
+            "</span>";
+          if (p.unverified) {
+            bd += '\n<span class="dim">  U  unverified </span>';
+            bd += '<span class="err"> \u00d7' + r.Uv.toFixed(2) + "</span>";
+            bd += '<span class="dim">  source not verified</span>';
+          }
         }
         document.getElementById("breakdown").innerHTML = bd;
 
@@ -1518,8 +1678,10 @@
         notes += "  T  deploy block timestamp (rpc bisect\n";
         notes += "     or etherscan getcontractcreation)\n";
         notes += "  V  ETH + ERC20 TVL via Multicall3 (escrow)\n";
-        notes += "     min(now, 7d, 30d) resists flash deposits\n";
-        notes += "     txlistinternal 30d volume (routers)\n";
+        notes += "     ERC20 priced via Chainlink ETH/USD\n";
+        notes += "     min(now, 7d, 30d) for ETH + ERC20\n";
+        notes += "     txlistinternal + tokentx volume (routers)\n";
+        notes += "     10K cap → sample extrapolation if needed\n";
         notes += "  C  verified source LOC (sourcify or\n";
         notes += "     etherscan). simpler = higher score\n";
         notes += "  P  EIP-1967 proxy slot or etherscan flag\n";
@@ -1537,7 +1699,7 @@
           (usedRpc || RPC_LIST[0].replace("https://", "").split("/")[0]);
         if (apiKey) fp += " | etherscan v2";
         else fp += " | sourcify";
-        fp += " | multicall3";
+        fp += " | multicall3 | chainlink";
         var footer = document.getElementById("footer");
         footer.textContent = "";
         footer.appendChild(document.createTextNode(fp + " | "));
